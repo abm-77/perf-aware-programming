@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const print = std.debug.print;
 
 const N_THREADS = 8;
-const N_PAIRS = 100_000;
+const N_PAIRS = 10_000;
 
 const LAT_MIN = -90.0;
 const LAT_MAX = 90.0;
@@ -51,6 +51,9 @@ const HaversineJsonData = struct {
     pairs: []Pair,
 
     pub fn init(allocator: std.mem.Allocator, rand: std.Random, count: u64) HaversineJsonData {
+        const t = time.Trace.begin(@src());
+        defer t.end();
+
         var data = std.mem.zeroes(HaversineJsonData);
         data.pairs = allocator.alloc(Pair, count) catch unreachable;
 
@@ -95,6 +98,9 @@ const HaversineJsonData = struct {
     }
 
     pub fn initFromFile2(allocator: std.mem.Allocator, path: []const u8) !HaversineJsonData {
+        const t = time.Trace.begin(@src());
+        defer t.end();
+
         var pair_data = std.mem.zeroes(HaversineJsonData);
         pair_data.pairs = allocator.alloc(Pair, N_PAIRS) catch unreachable;
 
@@ -124,6 +130,9 @@ const HaversineJsonData = struct {
 };
 
 fn generateInputFile(allocator: std.mem.Allocator, out_file: std.fs.File, rand: std.Random, count: u64) !f64 {
+    const t = time.Trace.begin(@src());
+    defer t.end();
+
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
     const data = HaversineJsonData.init(arena_allocator.allocator(), rand, count);
@@ -132,6 +141,9 @@ fn generateInputFile(allocator: std.mem.Allocator, out_file: std.fs.File, rand: 
 }
 
 fn calcAverageHaversine(data: HaversineJsonData) f64 {
+    const t = time.Trace.begin(@src());
+    defer t.end();
+
     var sum: f64 = 0;
     for (data.pairs) |pair| {
         sum += referenceHaversine(pair.x0, pair.x1, pair.y0, pair.y1);
@@ -140,45 +152,36 @@ fn calcAverageHaversine(data: HaversineJsonData) f64 {
 }
 
 pub fn main() !void {
-    time.Timer.calibrate(100);
-    var start: f64 = 0;
-    var total: f64 = 0;
+    time.calibrate(100);
+    var t: time.Trace = undefined;
 
-    start = time.Timer.start();
+    t = time.Trace.beginNamed(@src(), "Startup Allocator");
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    print("startup allocator: {d} secs\n", .{time.Timer.elapsed(start, &total)});
+    t.end();
 
     var answer: f64 = 0;
     const argc = std.os.argv.len;
     if (argc > 1) {
-        start = time.Timer.start();
+        t = time.Trace.beginNamed(@src(), "Startup Random");
         const seed: u64 = if (argc > 1) std.fmt.parseUnsigned(u64, std.mem.sliceTo(std.os.argv[1], 0), 0) catch 0 else @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
         var prng = std.Random.DefaultPrng.init(seed);
         const rand = prng.random();
         const out_file = try std.fs.cwd().createFile("data_working.json", .{});
         defer out_file.close();
-        print("startup rng: {d} secs\n", .{time.Timer.elapsed(start, &total)});
+        t.end();
 
-        start = time.Timer.start();
         answer = try generateInputFile(allocator, out_file, rand, N_PAIRS);
-        print("generate json: {d} secs\n", .{time.Timer.elapsed(start, &total)});
     }
 
-    start = time.Timer.start();
     const d = try HaversineJsonData.initFromFile2(allocator, "data_working.json");
-    print("read json: {d} secs\n", .{time.Timer.elapsed(start, &total)});
 
-    start = time.Timer.start();
     const calculated = calcAverageHaversine(d);
-    print("haversine: {d} secs\n", .{time.Timer.elapsed(start, &total)});
 
-    start = time.Timer.start();
+    t = time.Trace.beginNamed(@src(), "Cleanup");
     allocator.free(d.pairs);
     assert(gpa.deinit() == .ok);
-    print("cleanup: {d} secs\n", .{time.Timer.elapsed(start, &total)});
-
-    print("total time: {d}\n\n", .{total});
+    t.end();
 
     print("answer: {d}, calculated: {d}, diff: {d}\n", .{ answer, calculated, calculated - answer });
 }
